@@ -1,0 +1,273 @@
+/* ===== Global Reset ===== */
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
+}
+
+body {
+  background-color: #0f172a; /* deep slate */
+  color: #e5e7eb;
+}
+
+/* ===== App Container ===== */
+.App {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* ===== Header ===== */
+
+.app-header {
+  height: 72px;
+  background: ##13182e;
+  border-bottom: 1px solid #1f2937;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 2rem;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.header-logo {
+  width: 36px;
+  height: 36px;
+}
+
+.header-title-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.header-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.header-subtitle {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* ===== Connection Badge ===== */
+
+.connection-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid #334155;
+  background-color: #111827;
+  color: #cbd5e1;
+}
+
+.connection-badge.connected {
+  border-color: #22c55e;
+  color: #86efac;
+}
+
+.connection-badge.disconnected {
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.model-name {
+  opacity: 0.7;
+}
+
+/* ===== Run Button ===== */
+
+.run-button {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.2rem;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+.run-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+/* ===== Three Panel Layout ===== */
+.three-panel-container {
+  display: flex;
+  height: 100%;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+/* Panel base styles */
+.panel {
+  background-color: #111827;
+  border: 1px solid #1f2937;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.03),
+              0 8px 24px rgba(0,0,0,0.5);
+}
+
+/* Panel sizing */
+.left-panel {
+  flex: 1;
+  min-width: 250px;
+}
+
+.center-panel {
+  flex: 2;
+}
+
+.right-panel {
+  flex: 2;
+}
+
+/* ===== Headings ===== */
+.panel h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: #111827; /* near black for strong contrast */
+}
+
+/* ===== Buttons ===== */
+button {
+  background-color: #2563eb; /* blue */
+  color: #ffffff;
+  border: none;
+  border-radius: 0.375rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+button {
+  background: linear-gradient(90deg, #6366f1, #8b5cf6);
+  font-weight: 600;
+}
+
+button:disabled {
+  background-color: #9ca3af; /* gray */
+  cursor: not-allowed;
+}
+
+/* ===== Inputs & Textareas ===== */
+input, textarea, select {
+  background-color: #0f172a;
+  color: #e5e7eb;
+  border: 1px solid #334155;
+}
+
+
+input:focus, textarea:focus, select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 2px rgba(99,102,241,0.3);
+}
+
+/* ===== Tables / Lists ===== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.5rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+th {
+  background-color: #f3f4f6;
+  font-weight: 600;
+}
+
+/* ===== Badges / Metrics ===== */
+.badge {
+  display: inline-block;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.badge-success {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.badge-fail {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-latency {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.badge-cost {
+  background-color: #e0f2fe;
+  color: #0369a1;
+}
+
+/* ===== Scrollbars ===== */
+.panel::-webkit-scrollbar {
+  width: 8px;
+}
+
+.panel::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
+}
+
+.panel::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.panel::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 1024px) {
+  .three-panel-container {
+    flex-direction: column;
+  }
+
+  .left-panel, .center-panel, .right-panel {
+    flex: unset;
+    width: 100%;
+  }
+}

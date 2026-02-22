@@ -1,0 +1,3 @@
+[dev]
+  functions = "netlify/functions"
+  port = 5174  # optional: your dev server port if using Vite
