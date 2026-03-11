@@ -1,12 +1,27 @@
 import { useState } from "react";
 import { useEval } from "./EvalContext";
 
+function truncate(text?: string, maxLength = 120) {
+  if (!text) return "N/A";
+  const clean = text.replace(/\n+/g, " ").replace(/\s{2,}/g, " ").trim();
+  return clean.length > maxLength ? clean.slice(0, maxLength) + "…" : clean;
+}
+
 function formatText(text?: string) {
   if (!text) return "N/A";
-  return text
-    .replace(/\n+/g, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+  return text.replace(/\n+/g, " ").replace(/\s{2,}/g, " ").trim();
+}
+
+// Core pass logic: pass if ANY enabled check passes
+function computeIsPassed(
+  run: { deterministicCheckPass?: string; normalisedCheckPass?: string; llmCheckPass?: string },
+  test?: { strict?: boolean; allowNormalized?: boolean; useLLMCheck?: boolean }
+): boolean {
+  const checks: boolean[] = [];
+  if (test?.strict) checks.push(run.deterministicCheckPass === "TRUE");
+  if (test?.allowNormalized) checks.push(run.normalisedCheckPass === "TRUE");
+  if (test?.useLLMCheck) checks.push(run.llmCheckPass === "TRUE");
+  return checks.length > 0 && checks.some(Boolean);
 }
 
 export default function EvaluationResultsPanel() {
@@ -33,46 +48,26 @@ export default function EvaluationResultsPanel() {
   let totalLatency = 0;
 
   perTestCaseRuns?.forEach(tcRun => {
+    const test = testCases.find(t => t.id === tcRun.testCaseId);
     tcRun.runs.forEach(run => {
-      const isPassed =
-        run.deterministicCheckPass === "TRUE" ||
-        run.normalisedCheckPass === "TRUE" ||
-        run.llmCheckPass === "TRUE";
+      const isPassed = computeIsPassed(run, test);
       totalRuns++;
       if (isPassed) passedRuns++;
       totalLatency += run.latency ?? 0;
     });
   });
 
-  const passRate =
-    totalRuns > 0 ? Math.round((passedRuns / totalRuns) * 100) : 0;
-  const avgLatency =
-    totalRuns > 0 ? Math.round(totalLatency / totalRuns) : 0;
-
+  const passRate = totalRuns > 0 ? Math.round((passedRuns / totalRuns) * 100) : 0;
+  const avgLatency = totalRuns > 0 ? Math.round(totalLatency / totalRuns) : 0;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
   const handleDownloadPromptCSV = () => {
-    const headers = [
-      "Prompt ID",
-      "Prompt Name",
-      "Model",
-      "System Prompt",
-      "User Template",
-      "Temperature",
-      "Max Tokens",
-      "Retry On Invalid",
-      "Runs Per Case",
-    ];
+    const headers = ["Prompt ID","Prompt Name","Model","System Prompt","User Template","Temperature","Max Tokens","Retry On Invalid","Runs Per Case"];
     const row = [
-      selectedPrompt.id.toString(),
-      selectedPrompt.name,
-      selectedPrompt.modelName,
-      formatText(selectedPrompt.systemPrompt),
-      formatText(selectedPrompt.userTemplate),
-      selectedPrompt.temperature.toString(),
-      selectedPrompt.maxTokens.toString(),
-      selectedPrompt.retryOnInvalid ? "TRUE" : "FALSE",
-      selectedPrompt.runsPerCase.toString(),
+      selectedPrompt.id.toString(), selectedPrompt.name, selectedPrompt.modelName,
+      formatText(selectedPrompt.systemPrompt), formatText(selectedPrompt.userTemplate),
+      selectedPrompt.temperature.toString(), selectedPrompt.maxTokens.toString(),
+      selectedPrompt.retryOnInvalid ? "TRUE" : "FALSE", selectedPrompt.runsPerCase.toString(),
     ];
     const csvContent = [headers.join(","), row.map(v => `"${v}"`).join(",")].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -83,56 +78,23 @@ export default function EvaluationResultsPanel() {
   };
 
   const handleDownloadResultsCSV = () => {
-    const headers = [
-      "Prompt ID",
-      "Prompt Name",
-      "Model",
-      "Test Case ID",
-      "Test Case Input",
-      "Expected Output",
-      "Run #",
-      "LLM Output",
-      "Passed",
-      "Retry",
-      "Strict",
-      "Allow Normalized",
-      "LLM Check",
-      "LLM Reason",
-      "Reason",
-    ];
-
+    const headers = ["Prompt ID","Prompt Name","Model","Test Case ID","Test Case Input","Expected Output","Run #","LLM Output","Passed","Retry","Strict","Allow Normalized","LLM Check","LLM Reason","Reason"];
     const rows: string[][] = [];
-
     perTestCaseRuns?.forEach(tcRun => {
       const test = testCases.find(t => t.id === tcRun.testCaseId);
       if (!test) return;
-
       tcRun.runs.forEach(run => {
-        const isPassed =
-          run.deterministicCheckPass === "TRUE" ||
-          run.normalisedCheckPass === "TRUE" ||
-          run.llmCheckPass === "TRUE";
-
+        const isPassed = computeIsPassed(run, test);
         rows.push([
-          selectedPrompt.id.toString(),
-          selectedPrompt.name,
-          selectedPrompt.modelName,
-          test.id.toString(),
-          formatText(test.input),
-          formatText(test.expectedOutput ?? ""),
-          run.runNumber.toString(),
-          formatText(run.output),
-          isPassed ? "TRUE" : "FALSE",
-          run.retried ? "TRUE" : "FALSE",
-          test.strict ? "TRUE" : "FALSE",
-          test.allowNormalized ? "TRUE" : "FALSE",
-          run.llmCheck ?? "N/A",
-          formatText(run.llmReason),
-          formatText(run.reason),
+          selectedPrompt.id.toString(), selectedPrompt.name, selectedPrompt.modelName,
+          test.id.toString(), formatText(test.input), formatText(test.expectedOutput ?? ""),
+          run.runNumber.toString(), formatText(run.output),
+          isPassed ? "TRUE" : "FALSE", run.retried ? "TRUE" : "FALSE",
+          test.strict ? "TRUE" : "FALSE", test.allowNormalized ? "TRUE" : "FALSE",
+          run.llmCheck ?? "N/A", formatText(run.llmReason), formatText(run.reason),
         ]);
       });
     });
-
     const csvContent = [headers.join(","), ...rows.map(r => r.map(v => `"${v}"`).join(","))].join("\n");
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const link = document.createElement("a");
@@ -151,11 +113,13 @@ export default function EvaluationResultsPanel() {
     <div className="form-panel">
       <h2>Evaluation Results</h2>
 
-      {/* Metrics */}
+      {/* Metrics row */}
       <div className="metrics-row">
         <div className="metric-card">
           <span className="metric-label">Pass Rate</span>
-          <span className="metric-value">{passRate}%</span>
+          <span className="metric-value" style={{ color: passRate === 100 ? "#22c55e" : passRate >= 50 ? "#f59e0b" : "#ef4444" }}>
+            {passRate}%
+          </span>
         </div>
         <div className="metric-card">
           <span className="metric-label">Avg Latency</span>
@@ -172,83 +136,150 @@ export default function EvaluationResultsPanel() {
       </div>
 
       <div style={{ marginTop: "1rem" }}>
-        <button
-          onClick={() => setShowDetails(!showDetails)}
-          style={{ padding: "0.5rem 1rem", borderRadius: "6px", cursor: "pointer" }}
-        >
-          {showDetails ? "Hide All Detailed Results" : "Show All Detailed Results"}
+        <button onClick={() => setShowDetails(!showDetails)}>
+          {showDetails ? "Hide Details" : "Show Details"}
         </button>
       </div>
 
-      {showDetails &&
-        perTestCaseRuns?.map(tcRun => {
-          const test = testCases.find(t => t.id === tcRun.testCaseId);
-          if (!test) return null;
+      {showDetails && perTestCaseRuns?.map(tcRun => {
+        const test = testCases.find(t => t.id === tcRun.testCaseId);
+        if (!test) return null;
+        const isExpanded = expandedTestCases.includes(tcRun.testCaseId);
 
-          const isExpanded = expandedTestCases.includes(tcRun.testCaseId);
+        // Summary pass rate for this test case
+        const tcPassed = tcRun.runs.filter(r => computeIsPassed(r, test)).length;
+        const tcTotal = tcRun.runs.length;
 
-          return (
-            <div key={tcRun.testCaseId} className="testcase-section">
-              <h3
-                style={{ cursor: "pointer" }}
-                onClick={() => toggleTestCase(tcRun.testCaseId)}
-              >
-                {isExpanded ? "▼" : "►"} Test Case: {formatText(test.input)}
-              </h3>
-              <p><strong>Expected:</strong> {formatText(test.expectedOutput)}</p>
-              <p>
-                <strong>Options:</strong>{" "}
-                Strict: {test.strict ? "TRUE" : "FALSE"},{" "}
-                Allow Normalized: {test.allowNormalized ? "TRUE" : "FALSE"},{" "}
-                LLM Check: {test.useLLMCheck ? "TRUE" : "FALSE"}
-              </p>
-
-              {isExpanded &&
-                tcRun.runs.map(run => {
-                  const isPassed =
-                    run.deterministicCheckPass === "TRUE" ||
-                    run.normalisedCheckPass === "TRUE" ||
-                    run.llmCheckPass === "TRUE";
-
-                  return (
-                    <div
-                      key={run.runNumber}
-                      className={`run-card ${isPassed ? "passed" : "failed"}`}
-                      style={{ marginBottom: "0.75rem", padding: "0.5rem", borderRadius: "6px", border: "1px solid #334155" }}
-                    >
-                      <p><strong>Run #{run.runNumber}</strong></p>
-                      <p><strong>Output:</strong> {formatText(run.output)}</p>
-                      <p><strong>Passed:</strong> {isPassed ? "TRUE" : "FALSE"}</p>
-
-                      {test.useLLMCheck && run.llmCheck && (
-                        <p>
-                          <strong>LLM Check:</strong>{" "}
-                          <span
-                            className={`llm-badge ${
-                              run.llmCheck === "TRUE" ? "approved" : "rejected"
-                            }`}
-                          >
-                            {run.llmCheck}: {formatText(run.llmReason)}
-                          </span>
-                        </p>
-                      )}
-
-                      <p><strong>Reason:</strong> {formatText(run.reason)}</p>
-                      <p><strong>Latency:</strong> {run.latency} ms</p>
-                      <p><strong>Retried:</strong> {run.retried ? "TRUE" : "FALSE"}</p>
-                    </div>
-                  );
-                })}
+        return (
+          <div key={tcRun.testCaseId} style={{ marginTop: "1.25rem", borderRadius: "8px", border: "1px solid #1f2937", overflow: "hidden" }}>
+            {/* Test case header */}
+            <div
+              onClick={() => toggleTestCase(tcRun.testCaseId)}
+              style={{
+                cursor: "pointer",
+                padding: "0.75rem 1rem",
+                background: "#1e293b",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "1rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 }}>
+                <span style={{ color: "#64748b", fontSize: "0.8rem" }}>{isExpanded ? "▼" : "►"}</span>
+                <span style={{ fontSize: "0.85rem", fontWeight: 600, color: "#f1f5f9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {truncate(test.input, 60)}
+                </span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexShrink: 0 }}>
+                <span style={{ fontSize: "0.75rem", color: "#94a3b8" }}>
+                  {tcPassed}/{tcTotal} passed
+                </span>
+                <span className={`badge ${tcPassed === tcTotal ? "success" : tcPassed === 0 ? "error" : "warning"}`}>
+                  {tcPassed === tcTotal ? "PASS" : tcPassed === 0 ? "FAIL" : "PARTIAL"}
+                </span>
+              </div>
             </div>
-          );
-        })}
 
-      <div style={{ marginTop: "1rem", display: "flex", gap: "1rem" }}>
+            {/* Expected + options row */}
+            <div style={{ padding: "0.6rem 1rem", background: "#111827", borderBottom: "1px solid #1f2937", fontSize: "0.8rem", color: "#94a3b8", display: "flex", flexWrap: "wrap", gap: "1rem" }}>
+              <span><strong style={{ color: "#cbd5e1" }}>Expected:</strong> {truncate(test.expectedOutput, 80)}</span>
+              <span style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                {test.strict && <span style={{ color: "#818cf8" }}>Strict</span>}
+                {test.allowNormalized && <span style={{ color: "#818cf8" }}>Normalised</span>}
+                {test.useLLMCheck && <span style={{ color: "#818cf8" }}>LLM Check</span>}
+              </span>
+            </div>
+
+            {/* Run cards */}
+            {isExpanded && tcRun.runs.map(run => {
+              const isPassed = computeIsPassed(run, test);
+
+              return (
+                <div
+                  key={run.runNumber}
+                  style={{
+                    padding: "0.75rem 1rem",
+                    borderBottom: "1px solid #1f2937",
+                    background: isPassed ? "rgba(34,197,94,0.04)" : "rgba(239,68,68,0.04)",
+                    borderLeft: `3px solid ${isPassed ? "#22c55e" : "#ef4444"}`,
+                  }}
+                >
+                  {/* Run header */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem" }}>
+                    <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#94a3b8" }}>Run #{run.runNumber}</span>
+                    <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                      <span style={{ fontSize: "0.75rem", color: "#64748b" }}>{run.latency} ms</span>
+                      <span className={`badge ${isPassed ? "success" : "error"}`}>
+                        {isPassed ? "PASS" : "FAIL"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Output */}
+                  <div style={{ marginBottom: "0.5rem" }}>
+                    <span style={{ fontSize: "0.75rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>Output</span>
+                    <p style={{ fontSize: "0.85rem", color: "#e2e8f0", marginTop: "0.2rem", lineHeight: 1.5 }}>
+                      {truncate(run.output, 200)}
+                    </p>
+                  </div>
+
+                  {/* Check results */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.4rem" }}>
+                    {test.strict && (
+                      <span style={{
+                        fontSize: "0.72rem", padding: "0.2rem 0.5rem", borderRadius: "4px",
+                        background: run.deterministicCheckPass === "TRUE" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.12)",
+                        color: run.deterministicCheckPass === "TRUE" ? "#22c55e" : "#ef4444",
+                        border: `1px solid ${run.deterministicCheckPass === "TRUE" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                      }}>
+                        Strict: {run.deterministicCheckPass ?? "—"}
+                      </span>
+                    )}
+                    {test.allowNormalized && (
+                      <span style={{
+                        fontSize: "0.72rem", padding: "0.2rem 0.5rem", borderRadius: "4px",
+                        background: run.normalisedCheckPass === "TRUE" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.12)",
+                        color: run.normalisedCheckPass === "TRUE" ? "#22c55e" : "#ef4444",
+                        border: `1px solid ${run.normalisedCheckPass === "TRUE" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                      }}>
+                        Normalised: {run.normalisedCheckPass ?? "—"}
+                      </span>
+                    )}
+                    {test.useLLMCheck && (
+                      <span style={{
+                        fontSize: "0.72rem", padding: "0.2rem 0.5rem", borderRadius: "4px",
+                        background: run.llmCheckPass === "TRUE" ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.12)",
+                        color: run.llmCheckPass === "TRUE" ? "#22c55e" : "#ef4444",
+                        border: `1px solid ${run.llmCheckPass === "TRUE" ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}`,
+                      }}>
+                        LLM: {run.llmCheckPass ?? "—"}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* LLM reason — only if LLM check was run */}
+                  {test.useLLMCheck && run.llmReason && run.llmReason !== "N/A" && (
+                    <div style={{ marginTop: "0.5rem" }}>
+                      <span style={{ fontSize: "0.72rem", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.05em" }}>LLM Reason</span>
+                      <p style={{ fontSize: "0.8rem", color: "#94a3b8", marginTop: "0.2rem", lineHeight: 1.5 }}>
+                        {truncate(run.llmReason, 180)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      <div style={{ marginTop: "1.25rem", display: "flex", gap: "1rem" }}>
         <button className="btn-download" onClick={handleDownloadPromptCSV}>
           Download Prompt Config
         </button>
         <button className="btn-download" onClick={handleDownloadResultsCSV}>
-          Download Per-Run Results
+          Download Results CSV
         </button>
       </div>
     </div>

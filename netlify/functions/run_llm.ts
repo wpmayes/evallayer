@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import type { Handler } from "@netlify/functions";
 import type { EvalOptions } from "../../src/utils/hybridEval";
 import { evaluateOutput } from "../../src/utils/hybridEval";
@@ -27,13 +26,16 @@ interface RunLLMResult {
   testCaseId: number;
   input: string;
   output: string;
-
   passed: boolean;
   reason: string;
   validJson: boolean;
   retried: boolean;
   latency: number;
   runNumber: number;
+  deterministicCheck?: string;
+  deterministicCheckPass?: "TRUE" | "FALSE";
+  normalisedCheck?: string;
+  normalisedCheckPass?: "TRUE" | "FALSE";
   llmCheck?: "TRUE" | "FALSE";
   llmReason?: string;
 }
@@ -136,12 +138,16 @@ export const handler: Handler = async (event) => {
       testCaseId: testCase.id,
       input: testCase.input,
       output,
-      passed: evalResult.overallPassed, // ✅ updated
+      passed: evalResult.overallPassed,
       reason: evalResult.reason,
       validJson,
       retried,
       latency: Date.now() - start,
       runNumber,
+      deterministicCheck: evalResult.deterministicCheck,
+      deterministicCheckPass: evalResult.deterministicCheckPass,
+      normalisedCheck: evalResult.normalisedCheck,
+      normalisedCheckPass: evalResult.normalisedCheckPass,
       llmCheck: evalResult.llmCheck,
       llmReason: evalResult.llmReason,
     };

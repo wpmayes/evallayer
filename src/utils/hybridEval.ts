@@ -54,26 +54,24 @@ export async function evaluateOutput(
     };
   }
 
-  const deterministicCheck: "TRUE" | "FALSE" = "TRUE";
-  let deterministicCheckPass: "TRUE" | "FALSE" = "FALSE";
+  const deterministicCheck: "TRUE" | "FALSE" | undefined = strict ? "TRUE" : undefined;
+  let deterministicCheckPass: "TRUE" | "FALSE" | undefined = undefined;
 
   if (strict && actual === expectedTrimmed) {
     deterministicCheckPass = "TRUE";
+  } else if (strict) {
+    deterministicCheckPass = "FALSE";
   }
 
-  const normalisedCheck: "TRUE" | "FALSE" = allowNormalized ? "TRUE" : "FALSE";
-  let normalisedCheckPass: "TRUE" | "FALSE" = "FALSE";
+  const normalisedCheck: "TRUE" | "FALSE" | undefined = allowNormalized ? "TRUE" : undefined;
+  let normalisedCheckPass: "TRUE" | "FALSE" | undefined = undefined;
 
-  if (allowNormalized && normalize(actual) === normalize(expectedTrimmed)) {
-    normalisedCheckPass = "TRUE";
-  }
-
-  if (allowedVariants.some(v => normalize(actual) === normalize(v))) {
-    normalisedCheckPass = "TRUE";
-  }
-
-  if (regexVariants.some(rx => rx.test(actual))) {
-    normalisedCheckPass = "TRUE";
+  if (allowNormalized) {
+    normalisedCheckPass = (
+      normalize(actual).includes(normalize(expectedTrimmed)) ||
+      allowedVariants.some(v => normalize(actual).includes(normalize(v))) ||
+      regexVariants.some(rx => rx.test(actual))
+    ) ? "TRUE" : "FALSE";
   }
 
   let llmCheck: "TRUE" | "FALSE" | undefined;
@@ -93,17 +91,16 @@ export async function evaluateOutput(
     }
   }
 
-  const overallPassed =
-    deterministicCheckPass === "TRUE" ||
-    normalisedCheckPass === "TRUE" ||
-    llmCheckPass === "TRUE";
+  const overallPassed = (
+    (!strict || deterministicCheckPass === "TRUE") &&
+    (!allowNormalized || normalisedCheckPass === "TRUE") &&
+    (!useLLMCheck || llmCheckPass === "TRUE")
+  );
 
   const reasonParts = [
     deterministicCheckPass ? `Deterministic: ${deterministicCheckPass}` : null,
-    normalisedCheckPass ? `Normalized: ${normalisedCheckPass}` : null,
-    llmCheckPass
-      ? `LLM: ${llmCheckPass}${llmReason ? ` (${llmReason})` : ""}`
-      : null,
+    normalisedCheckPass ? `Normalised: ${normalisedCheckPass}` : null,
+    llmCheckPass ? `LLM: ${llmCheckPass}${llmReason ? ` (${llmReason})` : ""}` : null,
   ].filter(Boolean);
 
   return {

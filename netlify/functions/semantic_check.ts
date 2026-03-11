@@ -101,8 +101,7 @@ Answer ONLY with Yes or No and briefly explain.
     const llmCheck: "TRUE" | "FALSE" =
       raw.trim().toLowerCase().startsWith("y") ? "TRUE" : "FALSE";
 
-    const reason =
-      raw.replace(/^Yes:?\s*|^No:?\s*/i, "").trim() || "No explanation provided";
+    const reason = raw.replace(/^Yes:?,?\s*|^No:?,?\s*/i, "").trim() || "No explanation provided";
 
     return {
       statusCode: 200,

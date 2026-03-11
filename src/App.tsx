@@ -45,10 +45,14 @@ const allResults: RunResult[] = await runEvaluation({
   },
 });
 
-  const computeOverallPassed = (r: RunResult) =>
-    (r.deterministicCheckPass ?? false) &&
-    (r.normalisedCheckPass ?? true) &&
-    (r.llmCheckPass ?? true);
+  const computeOverallPassed = (r: RunResult) => {
+    const tc = testCases.find(t => t.id === r.testCaseId);
+    const checks: boolean[] = [];
+    if (tc?.strict) checks.push(r.deterministicCheckPass === "TRUE");
+    if (tc?.allowNormalized) checks.push(r.normalisedCheckPass === "TRUE");
+    if (tc?.useLLMCheck) checks.push(r.llmCheckPass === "TRUE");
+    return checks.length > 0 && checks.some(Boolean);
+  };
 
   const totalRuns = allResults.length;
   const passedRuns = allResults.filter(computeOverallPassed).length;
