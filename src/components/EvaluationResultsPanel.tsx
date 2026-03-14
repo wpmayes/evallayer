@@ -1,6 +1,21 @@
 import { useState } from "react";
 import { useEval } from "./EvalContext";
 
+interface FailureRecord {
+  testCaseId: number
+  input?: string
+  expected?: string
+  actual?: string
+  reason: string
+}
+
+interface CoverageRecord {
+  testCaseId: number
+  runs: number
+  passed: number
+  failed: number
+}
+
 function truncate(text?: string, maxLength = 120) {
   if (!text) return "N/A";
   const clean = text.replace(/\n+/g, " ").replace(/\s{2,}/g, " ").trim();
@@ -59,6 +74,84 @@ export default function EvaluationResultsPanel() {
 
   const passRate = totalRuns > 0 ? Math.round((passedRuns / totalRuns) * 100) : 0;
   const avgLatency = totalRuns > 0 ? Math.round(totalLatency / totalRuns) : 0;
+  let deterministicTotal = 0;
+  let deterministicPassed = 0;
+
+  let normalizedTotal = 0;
+  let normalizedPassed = 0;
+
+  let llmTotal = 0;
+  let llmPassed = 0;
+
+  const failures: FailureRecord[] = [];
+  const coverage: CoverageRecord[] = [];
+
+  perTestCaseRuns?.forEach(tcRun => {
+    const test = testCases.find(t => t.id === tcRun.testCaseId);
+    if (!test) return;
+
+    let tcPassed = 0;
+    let tcFailed = 0;
+
+    tcRun.runs.forEach(run => {
+
+      const passed = computeIsPassed(run, test);
+
+      if (passed) tcPassed++;
+      else tcFailed++;
+
+      // deterministic stats
+      if (test.strict) {
+        deterministicTotal++;
+        if (run.deterministicCheckPass === "TRUE") deterministicPassed++;
+      }
+
+      // normalized stats
+      if (test.allowNormalized) {
+        normalizedTotal++;
+        if (run.normalisedCheckPass === "TRUE") normalizedPassed++;
+      }
+
+      // llm stats
+      if (test.useLLMCheck) {
+        llmTotal++;
+        if (run.llmCheckPass === "TRUE") llmPassed++;
+      }
+
+      // failure tracking
+      if (!passed) {
+        failures.push({
+          testCaseId: test.id,
+          input: test.input,
+          expected: test.expectedOutput,
+          actual: run.output,
+          reason: run.reason ?? "Unknown"
+        });
+      }
+    });
+
+    coverage.push({
+      testCaseId: test.id,
+      runs: tcRun.runs.length,
+      passed: tcPassed,
+      failed: tcFailed
+    });
+
+  });
+  const deterministicPassRate =
+  deterministicTotal > 0
+    ? Math.round((deterministicPassed / deterministicTotal) * 100)
+    : null;
+
+  const normalizedPassRate =
+    normalizedTotal > 0
+      ? Math.round((normalizedPassed / normalizedTotal) * 100)
+      : null;
+
+  const llmPassRate =
+    llmTotal > 0
+      ? Math.round((llmPassed / llmTotal) * 100)
+      : null;
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
 
   const handleDownloadPromptCSV = () => {
@@ -100,6 +193,52 @@ export default function EvaluationResultsPanel() {
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
     link.download = `evaluation_results_${timestamp}.csv`;
+    link.click();
+  };
+
+  const handleDownloadReport = () => {
+
+    const report = {
+
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        datasetSize: perTestCaseRuns?.length ?? 0,
+        runsPerCase: selectedPrompt.runsPerCase,
+        model: selectedPrompt.modelName,
+        temperature: selectedPrompt.temperature,
+        maxTokens: selectedPrompt.maxTokens
+      },
+
+      prompt: selectedPrompt,
+
+      summary: {
+        passRate,
+        avgLatency,
+        totalRuns,
+        passedRuns
+      },
+
+      checkPerformance: {
+        deterministicPassRate,
+        normalizedPassRate,
+        llmPassRate
+      },
+
+      coverage,
+
+      failures,
+
+      testCases: perTestCaseRuns
+    };
+
+    const blob = new Blob(
+      [JSON.stringify(report, null, 2)],
+      { type: "application/json" }
+    );
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `evaluation_report_${timestamp}.json`;
     link.click();
   };
 
@@ -281,6 +420,9 @@ export default function EvaluationResultsPanel() {
         <button className="btn-download" onClick={handleDownloadResultsCSV}>
           Download Results CSV
         </button>
+        <button onClick={handleDownloadReport}>
+  Download Evaluation Report
+</button>
       </div>
     </div>
   );
