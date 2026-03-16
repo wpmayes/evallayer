@@ -1,0 +1,21 @@
+{
+	"siteId": "ebd504d8-c53c-4bd9-a8e3-b7b5d9e0f294",
+	"geolocation": {
+		"data": {
+			"city": "Hull",
+			"country": {
+				"code": "GB",
+				"name": "United Kingdom"
+			},
+			"subdivision": {
+				"code": "ENG",
+				"name": "England"
+			},
+			"timezone": "Europe/London",
+			"latitude": 53.7606,
+			"longitude": -0.3734,
+			"postalCode": "HU5"
+		},
+		"timestamp": 1773433183519
+	}
+}

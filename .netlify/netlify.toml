@@ -1,0 +1,34 @@
+functionsDirectory = "C:\\Users\\willi\\evallayer\\netlify\\functions"
+functionsDirectoryOrigin = "ui"
+plugins = []
+headers = []
+redirects = []
+
+[build]
+publish = "C:\\Users\\willi\\evallayer\\dist"
+publishOrigin = "ui"
+commandOrigin = "ui"
+command = "npm run build"
+functions = "C:\\Users\\willi\\evallayer\\netlify\\functions"
+
+[build.environment]
+
+[build.processing]
+
+[build.processing.css]
+
+[build.processing.html]
+
+[build.processing.images]
+
+[build.processing.js]
+
+[build.services]
+
+[dev]
+functions = "netlify/functions"
+port = 5174.0
+
+[functions]
+
+[functions."*"]

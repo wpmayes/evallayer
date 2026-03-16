@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": ["../../../../evallayer/netlify/functions/check.ts"],
+  "sourceRoot": "C:/Users/willi/AppData/Local/Temp/tmp-11604-xH147cNEpbTO",
+  "sourcesContent": ["import type { Handler } from \"@netlify/functions\";\r\n\r\nexport const handler: Handler = async () => {\r\n  return {\r\n    statusCode: 200,\r\n    body: JSON.stringify({ HF_TOKEN: process.env.HF_TOKEN || \"not set\" }),\r\n  };\r\n};\r\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAEO,IAAM,UAAmB,YAAY;AAC1C,SAAO;AAAA,IACL,YAAY;AAAA,IACZ,MAAM,KAAK,UAAU,EAAE,UAAU,QAAQ,IAAI,YAAY,UAAU,CAAC;AAAA,EACtE;AACF;",
+  "names": []
+}

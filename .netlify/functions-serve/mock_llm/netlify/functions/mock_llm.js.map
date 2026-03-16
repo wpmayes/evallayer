@@ -1,0 +1,8 @@
+{
+  "version": 3,
+  "sources": ["../../../../evallayer/netlify/functions/mock_llm.ts"],
+  "sourceRoot": "C:/Users/willi/AppData/Local/Temp/tmp-11604-2vX6qcym29D4",
+  "sourcesContent": ["import { Handler } from \"@netlify/functions\";\r\n\r\nexport const handler: Handler = async (event) => {\r\n  const body = event.body ? JSON.parse(event.body) : {};\r\n  // eslint-disable-next-line @typescript-eslint/no-unused-vars\r\n  const { prompt, testCaseInput, runNumber } = body;\r\n\r\n  const fakeOutput = `Processed \"${testCaseInput}\" (Run ${runNumber})`;\r\n  const valid = Math.random() > 0.2;\r\n\r\n  return {\r\n    statusCode: 200,\r\n    body: JSON.stringify({ output: fakeOutput, valid }),\r\n  };\r\n};\r\n"],
+  "mappings": ";;;;;;;;;;;;;;;;;;;AAAA;AAAA;AAAA;AAAA;AAAA;AAEO,IAAM,UAAmB,OAAO,UAAU;AAC/C,QAAM,OAAO,MAAM,OAAO,KAAK,MAAM,MAAM,IAAI,IAAI,CAAC;AAEpD,QAAM,EAAE,QAAQ,eAAe,UAAU,IAAI;AAE7C,QAAM,aAAa,cAAc,aAAa,UAAU,SAAS;AACjE,QAAM,QAAQ,KAAK,OAAO,IAAI;AAE9B,SAAO;AAAA,IACL,YAAY;AAAA,IACZ,MAAM,KAAK,UAAU,EAAE,QAAQ,YAAY,MAAM,CAAC;AAAA,EACpD;AACF;",
+  "names": []
+}
