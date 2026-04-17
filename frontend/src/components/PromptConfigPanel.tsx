@@ -48,7 +48,11 @@ export default function PromptConfigPanel() {
     judgeModelName: "meta-llama/Meta-Llama-3-70B-Instruct",
     judgeProvider: "huggingface",
     systemPrompt: "",
-    userTemplate: "Process the following:\n\n{{input}}",
+    // FIX: single braces — Python's str.format() substitutes {input}.
+    // Double braces {{input}} are treated as literal text and never replaced,
+    // causing the model to receive the placeholder string instead of the
+    // test case input.
+    userTemplate: "{input}",
     temperature: 0.7,
     maxTokens: 200,
     schema: '{"field": "string"}',
@@ -59,7 +63,17 @@ export default function PromptConfigPanel() {
   const [formState, setFormState] = useState<PromptConfig>(selectedPrompt || defaultPrompt);
 
   useEffect(() => {
-    if (selectedPrompt) setFormState(selectedPrompt);
+    if (selectedPrompt) {
+      // Migrate any saved configs that used the old {{input}} placeholder.
+      // Python's str.format() ignores double-braced tokens so they were sent
+      // to the model verbatim. Silently fix on load so users don't have to
+      // manually re-save every config.
+      const migrated: PromptConfig = {
+        ...selectedPrompt,
+        userTemplate: selectedPrompt.userTemplate.replace(/\{\{input\}\}/g, "{input}"),
+      };
+      setFormState(migrated);
+    }
   }, [selectedPrompt]);
 
   const handleChange = (field: keyof PromptConfig, value: any) => {
@@ -81,11 +95,16 @@ export default function PromptConfigPanel() {
   };
 
   const handleSave = () => {
-    const updatedConfigs = promptConfigs.find(c => c.id === formState.id)
-      ? promptConfigs.map(c => (c.id === formState.id ? formState : c))
-      : [...promptConfigs, formState];
+    // Always persist with the corrected placeholder before saving
+    const toSave: PromptConfig = {
+      ...formState,
+      userTemplate: formState.userTemplate.replace(/\{\{input\}\}/g, "{input}"),
+    };
+    const updatedConfigs = promptConfigs.find(c => c.id === toSave.id)
+      ? promptConfigs.map(c => (c.id === toSave.id ? toSave : c))
+      : [...promptConfigs, toSave];
     setPromptConfigs(updatedConfigs);
-    setSelectedPrompt(formState);
+    setSelectedPrompt(toSave);
   };
 
   const handleNew = () => {
@@ -145,7 +164,7 @@ export default function PromptConfigPanel() {
         <label>
           Comparison Model{" "}
           <span style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: "normal" }}>
-            (optional - for model-vs-model evaluation)
+            (optional — for model-vs-model evaluation)
           </span>
         </label>
         <ModelSelect
@@ -186,13 +205,27 @@ export default function PromptConfigPanel() {
         />
       </div>
 
+      {/* FIX: label now shows {input} (single braces) to match Python's
+          str.format() syntax used by the backend worker */}
       <div className="form-full">
-        <label>User Template (use {"{{input}}"})</label>
+        <label>
+          User Template{" "}
+          <span style={{ fontSize: "0.75rem", color: "#64748b", fontWeight: "normal" }}>
+            (use <code style={{ fontSize: "0.75rem", color: "#94a3b8" }}>{"{input}"}</code> as the placeholder)
+          </span>
+        </label>
         <textarea
           rows={3}
           value={formState.userTemplate}
           onChange={(e) => handleChange("userTemplate", e.target.value)}
+          placeholder="{input}"
         />
+        {/* Warn if the user has typed the old double-brace syntax */}
+        {formState.userTemplate.includes("{{input}}") && (
+          <span style={{ fontSize: "0.72rem", color: "#f59e0b", marginTop: "0.25rem", display: "block" }}>
+            ⚠ Use {"{input}"} (single braces) — {"{{input}}"} will not be substituted by the backend.
+          </span>
+        )}
       </div>
 
       <div className="form-row">
@@ -255,7 +288,11 @@ export default function PromptConfigPanel() {
           className={`card ${selectedPrompt?.id === config.id ? "selected" : ""}`}
           onClick={() => {
             setSelectedPrompt(config);
-            setFormState(config);
+            setFormState({
+              ...config,
+              // Migrate on click too, in case config was saved before the fix
+              userTemplate: config.userTemplate.replace(/\{\{input\}\}/g, "{input}"),
+            });
           }}
         >
           {config.name}

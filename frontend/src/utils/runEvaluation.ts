@@ -1,228 +1,204 @@
-import type { PromptConfig, TestCase, RunResult } from "../components/EvalContext";
-import { evaluateOutput, type EvalOptions } from "./hybridEval";
-import { API_BASE_URL } from "../config";
+/**
+ * runEvaluation.ts
+ *
+ * Fires a backend Run for a given suite + prompt config, polls until
+ * complete, and maps backend Result rows back to frontend RunResult shape.
+ *
+ * Key fix: createBackendSuite() now returns a backendToFrontendId map so
+ * the caller can translate backend test_case_id → frontend tc.id.
+ * Without this, EvaluationResultsPanel's lookups all return undefined and
+ * every metric (pass rate, CI, CSV export) shows zero / empty.
+ */
 
-interface RunEvaluationArgs {
+import { API_BASE_URL } from "../config";
+import type { PromptConfig, TestCase, RunResult } from "../components/EvalContext";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface BackendResult {
+  id: number;
+  run_id: number;
+  test_case_id: number;
+  actual_output: string;
+  strict_passed: boolean | null;
+  normalised_passed: boolean | null;
+  llm_passed: boolean | null;
+  passed: boolean;
+  reason: string | null;
+  latency_ms: number;
+  raw_response: Record<string, unknown>;
+  created_at: string;
+}
+
+interface BackendRun {
+  id: number;
+  status: string;
+  total_cases: number;
+  passed: number;
+  failed: number;
+  pass_rate: number;
+  avg_latency_ms: number;
+}
+
+export interface RunEvaluationArgs {
+  suiteId: number;
+  /** Maps backend test_case_id → frontend tc.id */
+  backendToFrontendId: Record<number, number>;
   promptConfig: PromptConfig;
   testCases: TestCase[];
-  useRealAPI?: boolean;
-  evalOptions?: EvalOptions;
   onProgress?: (info: {
-    testCaseIndex: number;
-    runNumber: number;
-    completedRuns: number;
-    totalRuns: number;
+    status: string;
+    completed: number;
+    total: number;
+    label?: string;
   }) => void;
 }
 
-export const runEvaluation = async ({
-  promptConfig,
-  testCases,
-  useRealAPI = true,
-  evalOptions = {},
-  onProgress,
-}: RunEvaluationArgs): Promise<RunResult[]> => {
-  const allResults: RunResult[] = [];
-  const totalRuns = testCases.length * promptConfig.runsPerCase;
-  let completedRuns = 0;
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-  for (let tcIndex = 0; tcIndex < testCases.length; tcIndex++) {
-    const tc = testCases[tcIndex];
+function mapResult(
+  r: BackendResult,
+  backendToFrontendId: Record<number, number>,
+  runNumber = 1,
+): RunResult {
+  // Extract LLM judge reason from composite reason string.
+  // Backend format: "[normalised] ...\n[llm] some reason text"
+  const llmReasonMatch = r.reason?.match(/\[llm\]\s*(.+)/s);
+  const llmReason = llmReasonMatch ? llmReasonMatch[1].trim() : undefined;
 
-    for (let run = 1; run <= promptConfig.runsPerCase; run++) {
-      const start = performance.now();
+  return {
+    // Translate backend ID → frontend ID so panel lookups work
+    testCaseId: backendToFrontendId[r.test_case_id] ?? r.test_case_id,
+    output: r.actual_output,
+    latency: r.latency_ms,
+    retried: false,
+    runNumber,
 
-      if (useRealAPI) {
-        try {
-          // Build user message from template
-          const userMessage = promptConfig.userTemplate.replace("{{input}}", tc.input);
+    deterministicCheckPass:
+      r.strict_passed === null ? undefined : r.strict_passed ? "TRUE" : "FALSE",
+    normalisedCheckPass:
+      r.normalised_passed === null ? undefined : r.normalised_passed ? "TRUE" : "FALSE",
+    llmCheckPass:
+      r.llm_passed === null ? undefined : r.llm_passed ? "TRUE" : "FALSE",
+    llmReason,
+    reason: r.reason ?? undefined,
+  };
+}
 
-          // ── Primary inference ─────────────────────────────────────────────
-          const response = await fetch(`${API_BASE_URL}/inference/complete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              provider: promptConfig.provider ?? "huggingface",
-              model_id: promptConfig.modelName,
-              system_prompt: promptConfig.systemPrompt,
-              user_message: userMessage,
-              temperature: promptConfig.temperature,
-              max_tokens: promptConfig.maxTokens,
-            }),
-          });
+async function startRun(
+  suiteId: number,
+  modelId: string,
+  provider: string,
+  label: string,
+  temperature: number,
+  maxTokens: number,
+): Promise<number> {
+  console.log("startRun →", { suiteId, modelId, provider });
 
-          if (!response.ok) throw new Error(`Backend error: ${response.status}`);
-          const data = await response.json();
-          const output = data.output ?? "";
+  const resp = await fetch(`${API_BASE_URL}/runs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      suite_id: suiteId,
+      model_id: modelId,
+      provider,
+      label,
+      run_config: { temperature, max_tokens: maxTokens },
+    }),
+  });
 
-          // ── Deterministic + normalised checks (client-side) ───────────────
-          const evalResult = await evaluateOutput(output, tc.expectedOutput, {
-            strict: tc.strict ?? false,
-            allowNormalized: tc.allowNormalized ?? true,
-            useLLMCheck: false, // handled separately below
-          });
-
-          // ── LLM judge (optional, server-side via backend) ─────────────────
-          let llmCheck: "TRUE" | "FALSE" | undefined = undefined;
-          let llmCheckPass: "TRUE" | "FALSE" | undefined = undefined;
-          let llmReason: string | undefined = undefined;
-
-          if (tc.useLLMCheck && promptConfig.judgeModelName) {
-            const judgePrompt = `You are an evaluation judge.
-
-Expected criteria:
-${tc.expectedOutput}
-
-LLM output to evaluate:
-${output}
-
-Respond with a JSON object only, no markdown, no preamble:
-{"pass": true, "reason": "brief explanation of why the output meets the criteria"}
-or
-{"pass": false, "reason": "brief explanation of why the output does not meet the criteria"}`;
-
-            try {
-              const judgeResp = await fetch(`${API_BASE_URL}/inference/complete`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  provider: promptConfig.judgeProvider ?? "huggingface",
-                  model_id: promptConfig.judgeModelName,
-                  system_prompt: "You are a strict evaluation judge. Respond only with valid JSON containing 'pass' (boolean) and 'reason' (string). No markdown, no preamble, no explanation outside the JSON.",
-                  user_message: judgePrompt,
-                  temperature: 0.0,
-                  max_tokens: 150,
-                }),
-              });
-
-              if (judgeResp.ok) {
-                const judgeData = await judgeResp.json();
-                const cleaned = (judgeData.output ?? "")
-                  .replace(/```json\s*/i, "")
-                  .replace(/```/g, "")
-                  .trim();
-
-                try {
-                  const parsed = JSON.parse(cleaned);
-                  const passed = parsed.pass === true || parsed.pass === "true";
-                  llmCheck = passed ? "TRUE" : "FALSE";
-                  llmCheckPass = passed ? "TRUE" : "FALSE";
-                  llmReason = typeof parsed.reason === "string" && parsed.reason.trim()
-                    ? parsed.reason.trim()
-                    : "No reason provided";
-                } catch {
-                  // Fallback if JSON parse fails
-                  const fallback = cleaned.toLowerCase().includes('"pass":true') ||
-                    cleaned.toLowerCase().includes('"pass": true');
-                  llmCheck = fallback ? "TRUE" : "FALSE";
-                  llmCheckPass = llmCheck;
-                  llmReason = `JSON parse failed. Raw: ${cleaned.slice(0, 100)}`;
-                }
-              } else {
-                llmCheck = "FALSE";
-                llmCheckPass = "FALSE";
-                llmReason = `Judge request failed: ${judgeResp.status}`;
-              }
-            } catch (err) {
-              llmCheck = "FALSE";
-              llmCheckPass = "FALSE";
-              llmReason = `Judge call failed: ${(err as Error).message}`;
-            }
-          }
-
-          // ── Rebuild reason string with all checks ─────────────────────────
-          const reasonParts = [
-            evalResult.deterministicCheckPass
-              ? `Deterministic: ${evalResult.deterministicCheckPass}`
-              : null,
-            evalResult.normalisedCheckPass
-              ? `Normalised: ${evalResult.normalisedCheckPass}`
-              : null,
-            llmCheckPass
-              ? `LLM: ${llmCheckPass}${llmReason ? ` (${llmReason})` : ""}`
-              : null,
-          ].filter(Boolean);
-
-          const reason = reasonParts.join("; ") || "Failed all checks";
-
-          allResults.push({
-            testCaseId: tc.id,
-            output,
-            latency: Math.round(performance.now() - start),
-            retried: false,
-            runNumber: run,
-            deterministicCheck: evalResult.deterministicCheck,
-            deterministicCheckPass: evalResult.deterministicCheckPass,
-            normalisedCheck: evalResult.normalisedCheck,
-            normalisedCheckPass: evalResult.normalisedCheckPass,
-            llmCheck,
-            llmCheckPass,
-            llmReason,
-            reason,
-            promptTokens: data.prompt_tokens ?? 0,
-            completionTokens: data.completion_tokens ?? 0,
-            totalTokens: data.total_tokens ?? 0,
-            estimatedCostUsd: 0,
-          });
-
-        } catch (err) {
-          allResults.push({
-            testCaseId: tc.id,
-            output: "",
-            latency: Math.round(performance.now() - start),
-            retried: false,
-            runNumber: run,
-            deterministicCheck: undefined,
-            deterministicCheckPass: "FALSE",
-            normalisedCheck: undefined,
-            normalisedCheckPass: "FALSE",
-            llmCheck: "FALSE",
-            llmCheckPass: "FALSE",
-            llmReason: `Backend call failed: ${(err as Error).message}`,
-            reason: `Backend call failed: ${(err as Error).message}`,
-          });
-        }
-
-        completedRuns++;
-        onProgress?.({ testCaseIndex: tcIndex, runNumber: run, completedRuns, totalRuns });
-        continue;
-      }
-
-      // ── Mock mode (no API) ────────────────────────────────────────────────
-      const options = [
-        `Result A for "${tc.input}"`,
-        `Result B for "${tc.input}"`,
-        `Result C for "${tc.input}"`,
-      ];
-      const output = options[Math.floor(Math.random() * options.length)];
-
-      const evalResult = await evaluateOutput(output, tc.expectedOutput, {
-        ...evalOptions,
-        strict: tc.strict ?? false,
-        allowNormalized: tc.allowNormalized ?? true,
-        useLLMCheck: tc.useLLMCheck ?? false,
-      });
-
-      allResults.push({
-        testCaseId: tc.id,
-        output,
-        latency: Math.round(performance.now() - start),
-        retried: false,
-        runNumber: run,
-        deterministicCheck: evalResult.deterministicCheck,
-        deterministicCheckPass: evalResult.deterministicCheckPass,
-        normalisedCheck: evalResult.normalisedCheck,
-        normalisedCheckPass: evalResult.normalisedCheckPass,
-        llmCheck: evalResult.llmCheck,
-        llmCheckPass: evalResult.llmCheckPass,
-        llmReason: evalResult.llmReason,
-        reason: evalResult.reason,
-      });
-
-      completedRuns++;
-      onProgress?.({ testCaseIndex: tcIndex, runNumber: run, completedRuns, totalRuns });
-    }
+  if (!resp.ok) {
+    const detail = await resp.text();
+    throw new Error(`Failed to start run: ${detail}`);
   }
 
-  return allResults;
+  const run: BackendRun = await resp.json();
+  return run.id;
+}
+
+async function pollUntilComplete(
+  runId: number,
+  onProgress?: RunEvaluationArgs["onProgress"],
+  label?: string,
+): Promise<{ run: BackendRun; results: BackendResult[] }> {
+  while (true) {
+    const resp = await fetch(`${API_BASE_URL}/runs/${runId}`);
+    if (!resp.ok) throw new Error(`Failed to fetch run ${runId}`);
+
+    const data = await resp.json();
+    const run: BackendRun = data.run;
+
+    // completed = cases that have a result (passed + failed)
+    const completed = run.passed + run.failed;
+
+    onProgress?.({
+      status: run.status,
+      completed,
+      total: run.total_cases,
+      label,
+    });
+
+    if (run.status === "complete" || run.status === "error") {
+      return { run, results: data.results as BackendResult[] };
+    }
+
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+export const runEvaluation = async ({
+  suiteId,
+  backendToFrontendId,
+  promptConfig,
+  onProgress,
+}: RunEvaluationArgs): Promise<RunResult[]> => {
+  const {
+    modelName,
+    provider = "huggingface",
+    comparisonModelName,
+    comparisonProvider = "huggingface",
+    temperature,
+    maxTokens,
+  } = promptConfig;
+
+  // Primary run
+  const primaryRunId = await startRun(
+    suiteId, modelName, provider,
+    `${modelName.split("/").pop()} (primary)`,
+    temperature, maxTokens,
+  );
+
+  const { results: primaryResults } = await pollUntilComplete(
+    primaryRunId, onProgress, "Primary",
+  );
+
+  const mapped = primaryResults.map((r) => mapResult(r, backendToFrontendId, 1));
+
+  // Optional comparison run
+  if (comparisonModelName) {
+    const compRunId = await startRun(
+      suiteId, comparisonModelName, comparisonProvider,
+      `${comparisonModelName.split("/").pop()} (comparison)`,
+      temperature, maxTokens,
+    );
+
+    const { results: compResults } = await pollUntilComplete(
+      compRunId, onProgress, "Comparison",
+    );
+
+    mapped.push(...compResults.map((r) => mapResult(r, backendToFrontendId, 2)));
+  }
+
+  return mapped;
+};
+
+/**
+ * compareRuns — fetches the regression/fix diff between two backend runs.
+ */
+export const compareRuns = async (runAId: number, runBId: number) => {
+  const resp = await fetch(`${API_BASE_URL}/runs/compare/${runAId}/${runBId}`);
+  if (!resp.ok) throw new Error("Failed to compare runs");
+  return resp.json();
 };

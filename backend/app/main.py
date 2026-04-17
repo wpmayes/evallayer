@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import os
+
 load_dotenv(override=False)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from app.database import init_db
 from app.routers import suites, runs, inference
 
@@ -22,6 +24,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── CORS ─────────────────────────────────────────────────────────────
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -35,10 +38,13 @@ app.add_middleware(
 )
 
 
+# ── Health check ─────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
+
+# ── Routers ───────────────────────────────────────────────────────────
 app.include_router(suites.router, prefix="/suites", tags=["Suites"])
 app.include_router(runs.router, prefix="/runs", tags=["Runs"])
 app.include_router(inference.router, prefix="/inference", tags=["Inference"])
