@@ -2,7 +2,78 @@
 import { useState, useEffect } from "react";
 import { useEval, type PromptConfig } from "./EvalContext";
 import { downloadSuiteYaml } from "../utils/suiteExport";
+import { checkModel, type CheckResult } from "../utils/checkModel";
 import { API_BASE_URL } from "../config";
+
+/**
+ * "Check availability" control shown under a model selector. Pings the model
+ * through the same inference path a run uses, so users learn a model can't be
+ * served before launching a full evaluation rather than after it fails.
+ */
+function ModelCheck({
+  provider,
+  model,
+  disabled,
+}: {
+  provider: string;
+  model: string;
+  disabled?: boolean;
+}) {
+  // Tag each result with the model it was for, so a stale result is ignored
+  // once the selection changes (no effect needed to clear it).
+  const [checked, setChecked] = useState<{ forModel: string; data: CheckResult } | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  const run = async () => {
+    if (!model) return;
+    setChecking(true);
+    const data = await checkModel(provider, model);
+    setChecked({ forModel: model, data });
+    setChecking(false);
+  };
+
+  const result = checked && checked.forModel === model ? checked.data : null;
+
+  const palette: Record<string, { color: string; bg: string; label: string }> = {
+    available: { color: "#22c55e", bg: "rgba(34,197,94,0.15)", label: "✓ Available" },
+    busy: { color: "#f59e0b", bg: "rgba(245,158,11,0.15)", label: "● Busy" },
+    unavailable: { color: "#ef4444", bg: "rgba(239,68,68,0.12)", label: "✗ Unavailable" },
+    error: { color: "#f59e0b", bg: "rgba(245,158,11,0.15)", label: "⚠ Check failed" },
+  };
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.35rem", flexWrap: "wrap" }}>
+      <button
+        type="button"
+        onClick={run}
+        disabled={disabled || checking || !model}
+        style={{
+          fontSize: "0.72rem", padding: "0.2rem 0.55rem", borderRadius: "5px",
+          border: "1px solid #334155", background: "none", color: "#94a3b8",
+          cursor: checking || !model ? "default" : "pointer",
+        }}
+      >
+        {checking ? "Checking…" : "Check availability"}
+      </button>
+      {result && (
+        <span
+          title={result.message ?? ""}
+          style={{
+            fontSize: "0.72rem", padding: "0.1rem 0.45rem", borderRadius: "4px",
+            background: palette[result.state].bg, color: palette[result.state].color,
+            cursor: result.message ? "help" : "default",
+          }}
+        >
+          {palette[result.state].label}
+          {result.state === "available" && result.latencyMs != null && ` · ${result.latencyMs} ms`}
+        </span>
+      )}
+      {result?.message && result.state !== "available" && (
+        <span style={{ fontSize: "0.7rem", color: "#64748b" }}>{result.message}</span>
+      )}
+    </div>
+  );
+}
 
 interface ModelOption {
   id: string;
@@ -166,6 +237,11 @@ export default function PromptConfigPanel({ backendStatus }: PromptConfigPanelPr
         {modelsError && (
           <span style={{ fontSize: "0.75rem", color: "#f59e0b" }}>{modelsError}</span>
         )}
+        <ModelCheck
+          provider={formState.provider ?? "huggingface"}
+          model={formState.modelName}
+          disabled={backendStatus !== "online"}
+        />
       </div>
 
       {/* Comparison model */}
@@ -186,6 +262,13 @@ export default function PromptConfigPanel({ backendStatus }: PromptConfigPanelPr
             Comparing: {formState.modelName.split("/").pop()} vs {formState.comparisonModelName.split("/").pop()}
           </span>
         )}
+        {formState.comparisonModelName && (
+          <ModelCheck
+            provider={formState.comparisonProvider ?? "huggingface"}
+            model={formState.comparisonModelName}
+            disabled={backendStatus !== "online"}
+          />
+        )}
       </div>
 
       {/* Judge model */}
@@ -203,6 +286,11 @@ export default function PromptConfigPanel({ backendStatus }: PromptConfigPanelPr
         <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: "0.25rem", display: "block" }}>
           Larger models produce more reliable judgements. Recommended: Meta-Llama-3-70B-Instruct.
         </span>
+        <ModelCheck
+          provider={formState.judgeProvider ?? "huggingface"}
+          model={formState.judgeModelName ?? ""}
+          disabled={backendStatus !== "online"}
+        />
       </div>
 
       <div className="form-full">
