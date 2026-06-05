@@ -21,7 +21,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 from datetime import datetime
 import asyncio
-import json
 
 from app.database import get_session, engine
 from app.models.schema import (
@@ -30,14 +29,16 @@ from app.models.schema import (
     TestCase, Suite,
 )
 
-from app.services.llm_providers import run_inference
-from app.services.scoring import score_result
+from app.services.evaluator import evaluate_suite
 from app.services.stats import run_statistics
 
 
 router = APIRouter()
 
 CONCURRENCY_LIMIT = 5
+
+# Fields on a result dict from evaluate_suite that aren't columns on Result.
+_NON_RESULT_FIELDS = ("name", "error")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -166,12 +167,10 @@ async def _execute_run(run_id: int) -> None:
     Executes a full evaluation run in the background.
 
     All SQLModel/SQLite calls are wrapped in asyncio.to_thread() so the
-    synchronous DB driver never blocks the event loop.  Inference and scoring
-    remain fully async and are fanned-out with asyncio.gather() + a semaphore
-    to cap concurrency at CONCURRENCY_LIMIT simultaneous LLM calls.
+    synchronous DB driver never blocks the event loop.  The inference and
+    scoring fan-out is delegated to evaluate_suite(), which caps concurrency at
+    CONCURRENCY_LIMIT simultaneous LLM calls.
     """
-    semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
-
     # ── 1. Load initial state from DB (blocking → thread) ─────────────────────
     def _load():
         with Session(engine) as s:
@@ -216,57 +215,32 @@ async def _execute_run(run_id: int) -> None:
         return
 
     # ── 2. Fan-out: run all test cases concurrently ────────────────────────────
-    async def process_case(tc: dict) -> Result:
-        async with semaphore:
-            try:
-                user_template = prompt_config.get("user_template", "{input}")
-                try:
-                    user_message = user_template.format(**tc["input_data"])
-                except Exception:
-                    user_message = json.dumps(tc["input_data"])
+    # The fan-out loop itself lives in the shared evaluator service so CLI runs
+    # and web runs use identical evaluation logic. The worker maps the returned
+    # dicts onto Result rows for persistence (test cases carry id under "id").
+    cases = [{**tc, "id": tc["id"]} for tc in test_cases]
+    run_config = run_data["run_config"]
 
-                inference = await run_inference(
-                    provider=run_data["provider"],
-                    model_id=tc["model_override"] or run_data["model_id"],
-                    system_prompt=prompt_config.get(
-                        "system_prompt", "You are a helpful assistant."
-                    ),
-                    user_message=user_message,
-                    temperature=run_data["run_config"].get("temperature", 0.7),
-                    max_tokens=run_data["run_config"].get("max_tokens", 512),
-                )
-
-                scores = await score_result(
-                    actual=inference.output,
-                    expected=tc["expected_output"],
-                    check_strict_flag=tc["check_strict"],
-                    check_normalised_flag=tc["check_normalised"],
-                    check_llm_flag=tc["check_llm"],
-                )
-
-                return Result(
-                    run_id=run_data["id"],
-                    test_case_id=tc["id"],
-                    actual_output=inference.output,
-                    latency_ms=inference.latency_ms,
-                    raw_response=inference.raw,
-                    **scores,
-                )
-
-            except Exception as exc:
-                return Result(
-                    run_id=run_data["id"],
-                    test_case_id=tc["id"],
-                    actual_output=str(exc),
-                    passed=False,
-                    latency_ms=0.0,
-                    raw_response={"error": str(exc)},
-                    reason=str(exc),
-                )
-
-    results: list[Result] = await asyncio.gather(
-        *(process_case(tc) for tc in test_cases)
+    case_results = await evaluate_suite(
+        cases,
+        prompt_config=prompt_config,
+        provider=run_data["provider"],
+        model_id=run_data["model_id"],
+        run_config=run_config,
+        judge_provider=run_config.get("judge_provider", "huggingface"),
+        judge_model=run_config.get(
+            "judge_model", "meta-llama/Meta-Llama-3-70B-Instruct"
+        ),
+        concurrency=CONCURRENCY_LIMIT,
     )
+
+    results: list[Result] = [
+        Result(
+            run_id=run_data["id"],
+            **{k: v for k, v in cr.items() if k not in _NON_RESULT_FIELDS},
+        )
+        for cr in case_results
+    ]
 
     # ── 3. Persist results and finalise run (blocking → thread) ───────────────
     def _save(results: list[Result], status: str = "complete"):

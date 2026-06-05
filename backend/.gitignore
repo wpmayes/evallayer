@@ -6,3 +6,9 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
+
+# Packaging / build artifacts (from `pip install -e .`)
+*.egg-info/
+build/
+dist/
+.pytest_cache/

@@ -9,8 +9,8 @@ Endpoints:
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import httpx
-import os
 from app.services.llm_providers import run_inference
+from app.services import model_registry
 
 router = APIRouter()
 
@@ -138,84 +138,4 @@ async def list_models():
     OpenRouter models fetched from OpenRouter API — free models sorted first.
     Falls back gracefully with error note if either fetch fails.
     """
-    hf_models = []
-    hf_note = None
-    or_models = []
-    or_note = None
-
-    # ── HuggingFace — fetch live from Router ───────────────────────────────────
-    token = os.getenv("HUGGINGFACE_TOKEN", "")
-    if token:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    "https://router.huggingface.co/v1/models",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                raw = data.get("data", data) if isinstance(data, dict) else data
-                hf_models = [
-                    {
-                        "id": m["id"] if isinstance(m, dict) else m,
-                        "policy_hint": (
-                            "Append :fastest, :cheapest, or "
-                            ":provider-name to override selection"
-                        ),
-                    }
-                    for m in raw
-                ]
-        except Exception as e:
-            hf_note = f"Live fetch failed: {e}. Check HUGGINGFACE_TOKEN."
-    else:
-        hf_note = "HUGGINGFACE_TOKEN not set."
-
-    # ── OpenRouter — fetch live ────────────────────────────────────────────────
-    key = os.getenv("OPENROUTER_API_KEY", "")
-    if key:
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.get(
-                    "https://openrouter.ai/api/v1/models",
-                    headers={"Authorization": f"Bearer {key}"},
-                )
-                resp.raise_for_status()
-                all_models = resp.json().get("data", [])
-                or_models = [
-                    {
-                        "id": m["id"],
-                        "name": m.get("name", m["id"]),
-                        "free": ":free" in m["id"],
-                        "context_length": m.get("context_length"),
-                    }
-                    for m in all_models
-                ]
-        except Exception as e:
-            or_note = f"Live fetch failed: {e}. Check OPENROUTER_API_KEY."
-    else:
-        or_note = "OPENROUTER_API_KEY not set."
-
-    return {
-        "huggingface": {
-            "models": hf_models,
-            "count": len(hf_models),
-            "note": hf_note,
-        },
-        "openrouter": {
-            # Free models sorted first, then alphabetically within each tier
-            "models": sorted(
-                or_models,
-                key=lambda x: (not x["free"], x["id"])
-            ),
-            "count": len(or_models),
-            "note": or_note,
-        },
-        "recommended": {
-            "default_inference": "HuggingFaceH4/zephyr-7b-beta",
-            "default_judge": "meta-llama/Meta-Llama-3-70B-Instruct",
-            "best_free_judge": "meta-llama/llama-3.3-70b-instruct:free",
-            "best_paid_judge": "anthropic/claude-3.5-sonnet",
-            "reasoning_judge": "deepseek-ai/DeepSeek-R1",
-            "safeguard_judge": "openai/gpt-oss-safeguard-20b",
-        }
-    }
+    return await model_registry.list_models()

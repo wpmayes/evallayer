@@ -17,6 +17,7 @@ EvalLayer addresses a common problem in LLM development: evaluation is often inf
 - **Model comparison** — run two models against the same test suite; McNemar's test available when paired results exist
 - **Cost and token tracking** — prompt tokens, completion tokens, and estimated cost per run surfaced in the UI and exported reports
 - **Structured exports** — prompt config CSV, per-run results CSV, and full JSON evaluation report including statistical analysis
+- **CLI / eval-as-code** — run YAML-defined suites from the terminal with no server, with a `--threshold` exit code for CI gating
 
 ---
 
@@ -69,6 +70,9 @@ Built with FastAPI and Python. Deployed on Railway.
 
 **Key files:**
 - `app/main.py` — FastAPI app with CORS and lifespan configuration
+- `app/cli.py` — terminal entry point for running suites as code (`evallayer` / `python -m app.cli`)
+- `app/services/evaluator.py` — shared fan-out loop used by both the web worker and the CLI
+- `app/services/model_registry.py` — live HF / OpenRouter model lists, shared by the API and `evallayer models`
 - `app/routers/inference.py` — inference endpoint with live model registry from HF Router and OpenRouter
 - `app/routers/runs.py` — evaluation run orchestration with background task execution and statistical comparison
 - `app/routers/suites.py` — test suite and test case CRUD
@@ -92,6 +96,111 @@ DATABASE_URL=sqlite:///./evallayer.db
 ```
 
 Interactive API documentation available at `http://localhost:8000/docs/` when running locally.
+
+---
+
+## CLI
+
+EvalLayer ships as a ready-to-go test harness you can drive from the terminal — no server, no database, no frontend. Drop your own provider key in `backend/.env`, describe a suite as a YAML file, and run it. Inference, scoring, and statistics use the same code as the web UI, so a CLI run is equivalent to a UI run.
+
+**Setup:**
+```bash
+cd backend
+pip install -e .                           # installs deps + the `evallayer` command
+```
+`pip install -e .` exposes EvalLayer as an `evallayer` command. If you'd rather not install, every command also works as `python -m app.cli …` after `pip install -r requirements.txt`.
+
+**Provider keys** are read from the environment, or from a `.env` file in whatever directory you run `evallayer` from (real environment variables win over `.env`):
+```bash
+export HUGGINGFACE_TOKEN=your_hf_token     # or put it in ./.env
+# optional, for OpenRouter models:
+export OPENROUTER_API_KEY=your_or_key
+```
+`run` and `compare` validate the key up front and fail fast with a clear message if it's missing — no wall of per-case errors.
+
+**Discover models** to test (live from HuggingFace / OpenRouter, needs the relevant key):
+```bash
+evallayer models                           # everything, both providers
+evallayer models --search llama --limit 10 # filter by ID substring
+evallayer models --provider openrouter --free
+```
+
+**Scaffold and run a suite:**
+```bash
+evallayer init suite.yaml                  # write an example suite
+evallayer run suite.yaml                   # run it, print a results table
+```
+
+**A suite file** defines the prompt, model, and test cases. Each case lists which checks to apply (`strict`, `normalised`, `llm`):
+```yaml
+name: Geography basics
+provider: huggingface            # huggingface | openrouter | ollama
+model: HuggingFaceH4/zephyr-7b-beta
+prompt:
+  system_prompt: "Answer with just the answer, no preamble."
+  user_template: "{question}"
+run_config:
+  temperature: 0.0
+  max_tokens: 256
+runs: 5                          # evaluate each case 5 times (default 1)
+judge:                           # only used by cases with an 'llm' check
+  provider: huggingface
+  model: meta-llama/Meta-Llama-3-70B-Instruct
+cases:
+  - name: capital-france
+    input: { question: "What is the capital of France?" }
+    expected: Paris
+    checks: [normalised]
+  - name: largest-planet
+    input: { question: "Which is the largest planet?" }
+    expected: Jupiter
+    checks: [normalised, llm]
+```
+A working example lives at `backend/examples/geography.yaml`. JSON suite files also work (YAML is a JSON superset), so a suite exported from the frontend can be replayed on the command line.
+
+**Repeated runs** — set `runs: N` to evaluate every case N times. LLM outputs vary run-to-run, so a single run can't tell you whether a pass was reliable or luck. With `runs > 1` the CLI reports per-case pass counts (e.g. `3/5`), a Bernoulli **consistency** score (HIGH / MEDIUM / LOW) flagging unstable cases, and tighter Wilson confidence intervals.
+
+**Comparing two models** — `compare` runs the suite against two models on identical cases and applies McNemar's paired test. Model A is the suite's `model`; model B is `--model-b`:
+```bash
+evallayer compare suite.yaml --model-b mistralai/Mistral-7B-Instruct-v0.3
+evallayer compare suite.yaml --model-b openai/gpt-4o-mini --provider-b openrouter \
+    --report compare.json --fail-on-regression
+```
+When `runs > 1`, each case is reduced to a single pass/fail by majority vote before comparison (the McNemar paired-design assumption). The output classifies each case as `fixed`, `regressed`, `unchanged`, or `error`. Cases where a model errored (e.g. a bad model ID or rate limit) are marked `ERR` and counted separately rather than mistaken for regressions, with a warning so a misconfigured `--model-b` is obvious. `--fail-on-regression` exits non-zero on any regression *or* errored case — a CI gate against shipping a worse (or broken) model.
+
+**Options** (`run`, and `--report`/`--concurrency`/`--json` also apply to `compare`):
+
+| Flag | Purpose |
+|------|---------|
+| `--report PATH` | Write a full JSON report (same shape as the frontend export). |
+| `--threshold 0..1` | `run` only — exit non-zero if the pass rate falls below this. |
+| `--model-b MODEL` | `compare` only — the second model to evaluate (B). |
+| `--provider-b NAME` | `compare` only — provider for model B (defaults to the suite's). |
+| `--fail-on-regression` | `compare` only — exit non-zero if any case regressed from A to B. |
+| `--concurrency N` | Max simultaneous LLM calls (default 5). |
+| `--json` | Emit the JSON report to stdout instead of a table. |
+
+**Exit codes:** `0` pass rate meets `--threshold` / no regressions; `1` below threshold (`run`) or a regression with `--fail-on-regression` (`compare`); `2` usage or suite-file error.
+
+**CI example** (GitHub Actions):
+```yaml
+- run: |
+    cd backend
+    pip install -e .
+    # Gate on absolute quality...
+    evallayer run evals/regression.yaml --threshold 0.9 --report report.json
+    # ...and/or gate on regressions against the current production model:
+    evallayer compare evals/regression.yaml --model-b "$PROD_MODEL" --fail-on-regression
+  env:
+    HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+```
+
+**Tests:** the CLI logic (suite parsing, per-case aggregation, consistency scoring, and the compare/McNemar path) is covered by offline unit tests in `backend/test_cli.py`:
+```bash
+cd backend
+pip install -e ".[dev]"
+python -m pytest test_cli.py -q
+```
 
 ---
 

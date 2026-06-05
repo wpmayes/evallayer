@@ -1,0 +1,41 @@
+# Example EvalLayer suite. Run with:
+#   cd backend
+#   python -m app.cli run examples/geography.yaml --threshold 0.8
+#
+# Requires a provider key in backend/.env (e.g. HUGGINGFACE_TOKEN=...).
+name: Geography basics
+provider: huggingface            # huggingface | openrouter | ollama
+model: HuggingFaceH4/zephyr-7b-beta
+
+prompt:
+  system_prompt: "Answer with just the answer, no preamble or explanation."
+  user_template: "{question}"
+
+run_config:
+  temperature: 0.0
+  max_tokens: 256
+
+# Evaluate each case this many times. >1 enables per-case consistency scoring
+# and tighter confidence intervals. Try `runs: 5` then compare the output.
+runs: 1
+
+# Only consulted by cases that enable the 'llm' check.
+judge:
+  provider: huggingface
+  model: meta-llama/Meta-Llama-3-70B-Instruct
+
+cases:
+  - name: capital-france
+    input: { question: "What is the capital of France?" }
+    expected: Paris
+    checks: [normalised]
+
+  - name: capital-japan
+    input: { question: "What is the capital of Japan?" }
+    expected: Tokyo
+    checks: [normalised]
+
+  - name: largest-planet
+    input: { question: "Which is the largest planet in our solar system?" }
+    expected: Jupiter
+    checks: [normalised, llm]
