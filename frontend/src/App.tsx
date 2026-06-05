@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useEval } from "./components/EvalContext";
 import type { RunResult } from "./components/EvalContext";
 import { runEvaluation } from "./utils/runEvaluation";
+import { buildSampleSuite } from "./utils/sampleSuite";
 import { API_BASE_URL } from "./config";
 
 import Header from "./components/Header";
@@ -16,7 +17,50 @@ export default function App() {
     selectedPrompt,
     testCases,
     setEvaluationResults,
+    setPromptConfigs,
+    setSelectedPrompt,
+    setTestCases,
   } = useEval();
+
+  const loadSampleSuite = () => {
+    const { prompt, testCases: cases } = buildSampleSuite();
+    setPromptConfigs((prev) => [...prev, prompt]);
+    setSelectedPrompt(prompt);
+    setTestCases(cases);
+    setEvaluationResults(null);
+  };
+
+  const [backendStatus, setBackendStatus] = useState<"checking" | "online" | "booting" | "offline">("checking");
+
+  useEffect(() => {
+    let retryTimeout: ReturnType<typeof setTimeout>;
+    let attempts = 0;
+    const MAX_RETRIES = 20;
+
+    const checkHealth = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/health`, {
+          signal: AbortSignal.timeout(8000),
+        });
+        if (response.ok) {
+          setBackendStatus("online");
+          return;
+        }
+      } catch {
+        // fall through to retry
+      }
+      attempts++;
+      if (attempts >= MAX_RETRIES) {
+        setBackendStatus("offline");
+      } else {
+        setBackendStatus("booting");
+        retryTimeout = setTimeout(checkHealth, 5000);
+      }
+    };
+
+    checkHealth();
+    return () => clearTimeout(retryTimeout);
+  }, []);
 
   const [isRunning, setIsRunning] = useState(false);
   const [showIntro, setShowIntro] = useState(false);
@@ -166,12 +210,22 @@ export default function App() {
       <div className="app-intro">
         <div className="intro-header">
           <h2>How it works</h2>
-          <button
-            className="intro-toggle"
-            onClick={() => setShowIntro(!showIntro)}
-          >
-            {showIntro ? "Hide" : "Show"}
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <button
+              className="intro-sample"
+              onClick={loadSampleSuite}
+              disabled={isRunning}
+              title="Load a ready-to-run sample suite, then click Run Evaluation"
+            >
+              Load example suite
+            </button>
+            <button
+              className="intro-toggle"
+              onClick={() => setShowIntro(!showIntro)}
+            >
+              {showIntro ? "Hide" : "Show"}
+            </button>
+          </div>
         </div>
 
         {showIntro && (
@@ -196,7 +250,7 @@ export default function App() {
       </div>
 
       <ThreePanelLayout
-        left={<PromptConfigPanel />}
+        left={<PromptConfigPanel backendStatus={backendStatus} />}
         center={<TestCasePanel />}
         right={<EvaluationResultsPanel />}
       />
@@ -205,6 +259,7 @@ export default function App() {
         onRunEvaluation={handleRunEvaluation}
         isRunning={isRunning}
         disabled={isRunning || !selectedPrompt || testCases.length === 0}
+        backendStatus={backendStatus}
       />
     </div>
   );

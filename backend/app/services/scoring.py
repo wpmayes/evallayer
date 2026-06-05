@@ -18,7 +18,7 @@ from app.services.llm_providers import run_inference
 
 def check_strict(actual: str, expected: str) -> tuple[bool, str]:
     passed = actual.strip() == expected.strip()
-    reason = None if passed else f"Exact match failed.\nExpected: {expected!r}\nActual:   {actual!r}"
+    reason = "" if passed else f"Exact match failed.\nExpected: {expected!r}\nActual:   {actual!r}"
     return passed, reason
 
 
@@ -35,7 +35,8 @@ def _normalise(text: str) -> str:
 def check_normalised(actual: str, expected: str) -> tuple[bool, str]:
     passed = _normalise(actual) == _normalise(expected)
     reason = (
-        None if passed
+        ""
+        if passed
         else f"Normalised match failed.\nExpected (normalised): {_normalise(expected)!r}\nActual (normalised):   {_normalise(actual)!r}"
     )
     return passed, reason

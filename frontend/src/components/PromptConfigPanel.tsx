@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useEffect } from "react";
 import { useEval, type PromptConfig } from "./EvalContext";
+import { downloadSuiteYaml } from "../utils/suiteExport";
 import { API_BASE_URL } from "../config";
 
 interface ModelOption {
@@ -9,15 +10,23 @@ interface ModelOption {
   params?: string;
 }
 
-export default function PromptConfigPanel() {
-  const { promptConfigs, setPromptConfigs, selectedPrompt, setSelectedPrompt } = useEval();
+interface PromptConfigPanelProps {
+  backendStatus: "checking" | "online" | "booting" | "offline";
+}
+
+export default function PromptConfigPanel({ backendStatus }: PromptConfigPanelProps) {
+  const { promptConfigs, setPromptConfigs, selectedPrompt, setSelectedPrompt, testCases } = useEval();
 
   const [hfModels, setHfModels] = useState<ModelOption[]>([]);
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (backendStatus !== "online" || hfModels.length > 0) return;
+
     const fetchModels = async () => {
+      setModelsLoading(true);
+      setModelsError(null);
       try {
         const resp = await fetch(`${API_BASE_URL}/inference/models`);
         if (!resp.ok) throw new Error("Failed to fetch models");
@@ -36,7 +45,7 @@ export default function PromptConfigPanel() {
       }
     };
     fetchModels();
-  }, []);
+  }, [backendStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const defaultPrompt: PromptConfig = {
     id: Date.now(),
@@ -276,7 +285,17 @@ export default function PromptConfigPanel() {
       <div className="button-row">
         <button onClick={handleSave}>Save Config</button>
         <button onClick={handleNew}>New Config</button>
+        <button
+          onClick={() => downloadSuiteYaml(formState, testCases)}
+          disabled={testCases.length === 0}
+          title="Download this config + test cases as suite.yaml to run with the EvalLayer CLI"
+        >
+          Export suite.yaml
+        </button>
       </div>
+      <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: "0.4rem", display: "block" }}>
+        Export runs unchanged in CI: <code style={{ color: "#94a3b8" }}>evallayer run suite.yaml</code>
+      </span>
 
       <hr />
 

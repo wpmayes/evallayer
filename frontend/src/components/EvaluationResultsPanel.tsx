@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useEval } from "./EvalContext";
 import { wilsonCI, consistencyScore } from "../utils/statsUtils";
 import type { PerCaseStats } from "../utils/statsUtils";
+import { downloadSuiteYaml } from "../utils/suiteExport";
 
 interface FailureRecord {
   testCaseId: number
@@ -38,6 +39,30 @@ function computeIsPassed(
   if (test?.allowNormalized) checks.push(run.normalisedCheckPass === "TRUE");
   if (test?.useLLMCheck) checks.push(run.llmCheckPass === "TRUE");
   return checks.length > 0 && checks.some(Boolean);
+}
+
+/** Horizontal error bar: shaded band = 95% CI, marker = observed pass rate. */
+function CIBar({ lower, upper, point }: { lower: number; upper: number; point: number }) {
+  const pct = (x: number) => `${Math.max(0, Math.min(1, x)) * 100}%`;
+  return (
+    <div
+      title={`95% confidence interval: ${Math.round(lower * 100)}%–${Math.round(upper * 100)}%`}
+      style={{
+        position: "relative", height: 8, flex: 1, minWidth: 120, maxWidth: 220,
+        background: "#1e293b", borderRadius: 4, cursor: "help",
+      }}
+    >
+      <div style={{
+        position: "absolute", top: 0, bottom: 0,
+        left: pct(lower), width: pct(upper - lower),
+        background: "rgba(129,140,248,0.4)", borderRadius: 4,
+      }} />
+      <div style={{
+        position: "absolute", top: -2, bottom: -2, left: pct(point),
+        width: 2, background: "#818cf8", transform: "translateX(-1px)",
+      }} />
+    </div>
+  );
 }
 
 function ConsistencyBadge({ score, description }: { score: string; description: string }) {
@@ -397,6 +422,21 @@ export default function EvaluationResultsPanel() {
         </div>
       )}
 
+      {/* Limitation note for normalised checks — explains likely false negatives */}
+      {normalizedTotal > 0 && (
+        <div style={{
+          marginTop: "0.5rem", padding: "0.5rem 0.6rem", borderRadius: "6px",
+          background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)",
+          fontSize: "0.72rem", color: "#cbd5e1", lineHeight: 1.5,
+        }}>
+          <strong style={{ color: "#f59e0b" }}>Note on normalised checks:</strong>{" "}
+          the whole output must match the expected value after lowercasing and
+          stripping punctuation. A correct-but-verbose answer (e.g. “The answer
+          is Paris” when expecting “Paris”) will fail. Enable the{" "}
+          <strong>LLM judge</strong> on a case for semantic correctness.
+        </div>
+      )}
+
       {/* Cost metrics row */}
       {hasCostData && (
         <div className="metrics-row" style={{ marginTop: "0.5rem" }}>
@@ -437,11 +477,24 @@ export default function EvaluationResultsPanel() {
 
         {/* Overall CI */}
         <div style={{ marginBottom: "0.4rem", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.4rem" }}>
-          <span style={{ fontSize: "0.75rem", color: "#64748b" }}>Pass rate:</span>
+          <span
+            style={{ fontSize: "0.75rem", color: "#64748b", cursor: "help" }}
+            title="The fraction of runs that passed. With repeated runs, read it alongside the confidence interval below — a single run can't tell a reliable pass from luck."
+          >
+            Pass rate:
+          </span>
           <span style={{ fontSize: "0.75rem", color: "#e2e8f0", fontWeight: 600 }}>
             {Math.round(overallReliability.passRate * 100)}%
           </span>
-          <span style={{ fontSize: "0.72rem", color: "#64748b" }}>
+          <CIBar
+            lower={overallReliability.ciLower}
+            upper={overallReliability.ciUpper}
+            point={overallReliability.passRate}
+          />
+          <span
+            style={{ fontSize: "0.72rem", color: "#64748b", cursor: "help" }}
+            title="Wilson 95% confidence interval: we're 95% confident the true pass rate lies in this range. It narrows as you add runs per case."
+          >
             95% CI: {Math.round(overallReliability.ciLower * 100)}%–{Math.round(overallReliability.ciUpper * 100)}%
             {" "}(n={overallReliability.nRuns})
           </span>
@@ -456,7 +509,12 @@ export default function EvaluationResultsPanel() {
 
         {/* Consistency */}
         <div style={{ marginBottom: "0.4rem", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "0.4rem" }}>
-          <span style={{ fontSize: "0.75rem", color: "#64748b" }}>Consistency:</span>
+          <span
+            style={{ fontSize: "0.75rem", color: "#64748b", cursor: "help" }}
+            title="How stable the model is on identical inputs across repeated runs. HIGH = same result every time; LOW = flips between pass and fail (needs more runs to trust)."
+          >
+            Consistency:
+          </span>
           <ConsistencyBadge score={overallConsistency.score} description={overallConsistency.description} />
           <span style={{ fontSize: "0.72rem", color: "#64748b" }}>
             {overallConsistency.description} (variance={overallConsistency.variance})
@@ -642,6 +700,13 @@ export default function EvaluationResultsPanel() {
         </button>
         <button onClick={handleDownloadReport}>
           Download Evaluation Report
+        </button>
+        <button
+          className="btn-download"
+          onClick={() => downloadSuiteYaml(selectedPrompt, testCases)}
+          title="Download this suite as suite.yaml to re-run in CI with: evallayer run suite.yaml"
+        >
+          Export suite.yaml
         </button>
       </div>
     </div>

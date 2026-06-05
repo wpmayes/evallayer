@@ -92,6 +92,11 @@ body {
   color: #fca5a5;
 }
 
+.connection-badge.booting {
+  border-color: #f59e0b;
+  color: #fcd34d;
+}
+
 .status-dot {
   width: 8px;
   height: 8px;

@@ -60,6 +60,27 @@ body {
   color: #c7d2fe;
 }
 
+.intro-sample {
+  background: #6366f1;
+  border: 1px solid #6366f1;
+  padding: 0.35rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+}
+
+.intro-sample:hover {
+  background: #4f46e5;
+  border-color: #4f46e5;
+}
+
+.intro-sample:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .intro-content {
   margin-top: 1rem;
   font-size: 0.85rem;
@@ -175,6 +196,11 @@ body {
 .connection-badge.disconnected {
   border-color: #ef4444;
   color: #fca5a5;
+}
+
+.connection-badge.booting {
+  border-color: #f59e0b;
+  color: #fcd34d;
 }
 
 .status-dot {

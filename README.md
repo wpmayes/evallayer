@@ -3,7 +3,7 @@
 A structured evaluation framework for testing large language models against well-defined, repeatable criteria. EvalLayer combines deterministic checks, normalised matching, and LLM-as-judge evaluation with statistical analysis and model comparison.
 
 **Live demo:** [evallayer.netlify.app](https://evallayer.netlify.app)  
-**API docs:** [evallayer-backend-production.up.railway.app/docs/](https://evallayer-backend-production.up.railway.app/docs/)
+**API docs:** [evallayer-backend.onrender.com/docs/](https://evallayer-backend.onrender.com/docs/)
 
 ---
 
@@ -43,7 +43,11 @@ Built with React, TypeScript, and Vite. Deployed on Netlify.
 - `src/utils/runEvaluation.ts` — evaluation orchestration, routes inference and judge calls through the backend API
 - `src/utils/statsUtils.ts` — Wilson CI, Bernoulli consistency, McNemar's test (pure TypeScript, no dependencies)
 - `src/utils/hybridEval.ts` — client-side deterministic and normalised checks
+- `src/utils/sampleSuite.ts` — the ready-to-run "Load example suite" demo (no key needed; uses the live backend)
+- `src/utils/suiteExport.ts` — exports the current UI suite as `suite.yaml` for the CLI (the UI→CLI bridge)
 - `src/config.ts` — API base URL configuration
+
+The results panel shows the Wilson CI as a visual error bar with plain-language tooltips, and flags the normalised-match limitation inline. "Export suite.yaml" turns a UI-built suite into a file the CLI runs unchanged.
 
 **Local development:**
 ```bash
@@ -59,14 +63,14 @@ VITE_API_BASE_URL=http://localhost:8000
 
 Or point at the live backend:
 ```
-VITE_API_BASE_URL=https://evallayer-backend-production.up.railway.app
+VITE_API_BASE_URL=https://evallayer-backend.onrender.com
 ```
 
 ---
 
 ## Backend
 
-Built with FastAPI and Python. Deployed on Railway.
+Built with FastAPI and Python. Deployed on Render.
 
 **Key files:**
 - `app/main.py` — FastAPI app with CORS and lifespan configuration
@@ -235,11 +239,11 @@ Model selection is live — the frontend fetches available models from both prov
 
 ## Deployment
 
-**Frontend:** Netlify — set `VITE_API_BASE_URL` in Netlify environment variables to point at the Railway backend URL.
+**Frontend:** Netlify — set `VITE_API_BASE_URL` in Netlify environment variables to point at the Render backend URL.
 
-**Backend:** Railway — set `HUGGINGFACE_TOKEN`, `OPENROUTER_API_KEY`, and `DATABASE_URL` in Railway service variables.
+**Backend:** Render — set `HUGGINGFACE_TOKEN`, `OPENROUTER_API_KEY`, and `DATABASE_URL` in the Render service's environment variables.
 
-**Database:** SQLite for development and current deployment. Swap `DATABASE_URL` to a PostgreSQL connection string for production persistence — Railway offers one-click PostgreSQL as an add-on.
+**Database:** SQLite for development and current deployment. Swap `DATABASE_URL` to a PostgreSQL connection string for production persistence — Render offers a managed PostgreSQL add-on.
 
 ---
 
